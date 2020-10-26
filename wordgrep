@@ -1,0 +1,168 @@
+#!/bin/bash
+# Author     : Adriel Munger
+# Description: Check the existence of patterns in office files
+
+use_docx2txt=true
+
+GREEN='\033[1;32m'
+BLUE='\033[1;34m'
+NC='\033[0m'
+buf="/var/tmp/document.xml"
+
+fcn_2txt()
+{
+    if ! type docx2txt &>/dev/null; then
+        echo "ERROR : docx2txt could not be found"
+        exit
+    elif ! type xlsx2csv &>/dev/null; then
+        echo "ERROR : xlsx2csv could not be found"
+        exit
+    fi
+    buf=/var/tmp/document.txt
+
+
+     # storing grep arguments
+     param=""
+     while [ "$#" -ne 1 ]; do
+         case "$1" in 
+             -A|-B|-C|-f|-m)
+                 param+=" $1 $2"
+                 shift
+                 ;;
+             -e|-i|-v|-L|-l|-P|-w)
+                 param+=" $1"
+                 ;;
+             *)
+                 # parsing arrived on pattern string
+                 break
+                 ;;
+         esac
+         shift
+     done
+
+     pattern="$1"
+     shift
+
+     # (
+     # set -x
+
+     echo -e "using ${GREEN}xlsx2csv${NC} and ${BLUE}docx2txt${NC} on pattern \"$pattern\"..."
+     # remaining arguments are files to be grep
+     for file in "$@"
+     do
+         # bad filename
+         if ! [ -f "$file" ]; then
+             echo -e "ERROR: file ${GREEN}${file}${NC} doesn't exist"
+             exit
+         elif [[ "${file}" == ~* ]]; then
+             # skipping temporary Office files
+             continue
+         elif [[ "${file}" == *.xlsx ]]; then
+             echo -e "${GREEN}${file}${NC} :"
+             xlsx2csv --sheet=0 "${file}" > $buf
+         elif [[ "${file}" == *.docx ]]; then
+             echo -e "${BLUE}${file}${NC} :"
+             docx2txt < "${file}" > $buf
+         else
+             echo "skipping file ${file}..."
+             continue
+         fi
+
+         grep --color=auto $param "$pattern" $buf
+         /bin/rm ${buf} > /dev/null
+     done
+     # )
+
+}
+
+fcn_unzip()
+{
+    # check if we want to grep through multiple files
+    pattern=$1
+    shift
+
+    /bin/rm "/var/tmp/*.xml"
+
+    while (( "$#" )); do
+
+    file="$1"
+
+    # skip temporary files
+    if [[ ${file} == ~* ]]; then
+        shift
+    else
+        # unzip only the word/document.xml file from WORD document
+        # store result in /var/tmp
+
+        # if file is *.docx
+        extract="word/document.xml"
+
+
+        unzip -o -j "$1" $extract -d /var/tmp > /dev/null
+        # unzip -p -j "$1" $extract > "$buf"
+        echo -e "${GREEN}$1 ${NC}:"
+        grep -o "[^>]*${pattern}[^<>]*" < "$buf"
+
+    fi
+
+    shift
+
+done
+
+}
+
+# usage : wordgrep pattern filename.docx
+print_help()
+{
+    echo "WORDGREP - pattern in Office files"
+    echo ""
+    echo -e "\t wordgrep converts to text files, then uses grep"
+    echo -e "\t common grep arguments are accepted"
+    echo -e ""
+    echo "USAGE: "
+    echo -e "\t wordgrep [--zip][--nc][grep args] \"pattern\" filename(s)"
+    echo ""
+    echo "Example : wordgrep -v -i \".word[^;]\" *.docx *.xlsx"
+    echo ""
+    echo "Parameters : "
+    echo "--zip : use unzip to search in Office files. Else it uses docx2txt and xlsx2csv"
+    echo "--nc  : disable output coloring"
+    exit
+}
+
+# help printing
+if [ "$#" == "0" ]; then
+    print_help
+fi
+
+case "$1" in 
+    -h|--help)
+        print_help
+        ;;
+    --unzip|--zip)
+        use_docx2txt=false
+        shift
+        ;;
+    --nc)
+        GREEN=""
+        BLUE=""
+        NC=""
+        shift
+        ;;
+esac
+
+# check if last argument is a regular file that exist
+if [ ! -f "${!#}" ]; then
+    echo "ERROR : file ${!#} doesn't exist"
+    exit -1
+fi
+
+if $use_docx2txt; then
+  fcn_2txt "$@"
+else
+  echo "using unzip"
+  fcn_unzip "$@"
+fi
+
+exit 0
+
